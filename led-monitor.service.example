@@ -1,0 +1,18 @@
+[Unit]
+Description=LED Ring Service Monitor
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+# Run as root so rpi_ws281x / GPIO can access hardware PWM and /dev/mem.
+User=root
+WorkingDirectory=/path/to/pimonitor
+ExecStart=/path/to/pimonitor/venv/bin/python led-monitor.py
+Restart=on-failure
+RestartSec=5
+Environment=PYTHONUNBUFFERED=1
+
+[Install]
+WantedBy=multi-user.target
+

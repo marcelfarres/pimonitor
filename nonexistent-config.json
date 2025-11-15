@@ -1,0 +1,21 @@
+{
+  "check_interval": 30,
+  "led_count": 24,
+  "services": [
+    {
+      "name": "internet",
+      "type": "ping",
+      "target": "8.8.8.8"
+    },
+    {
+      "name": "pihole",
+      "type": "http",
+      "target": "http://localhost/admin/api.php"
+    },
+    {
+      "name": "tailscale",
+      "type": "systemd",
+      "target": "tailscaled"
+    }
+  ]
+}

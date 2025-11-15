@@ -1,0 +1,49 @@
+{
+  "check_interval": 30,
+  "led_count": 10,
+  "services": [
+    {
+      "name": "internet",
+      "type": "ping",
+      "target": "8.8.8.8",
+      "severity": 5,
+      "comment": "Internet connectivity check"
+    },
+    {
+      "name": "pihole",
+      "type": "http",
+      "target": "http://localhost/admin/api.php",
+      "severity": 3,
+      "comment": "Pi-hole web interface"
+    },
+    {
+      "name": "tailscale",
+      "type": "systemd",
+      "target": "tailscaled",
+      "severity": 7,
+      "comment": "Tailscale VPN service"
+    },
+    {
+      "name": "example-service",
+      "type": "http",
+      "target": "http://localhost:8080/health",
+      "severity": 5,
+      "comment": "Example HTTP service"
+    },
+    {
+      "name": "example-tcp",
+      "type": "tcp",
+      "target": "localhost:22",
+      "severity": 4,
+      "comment": "Example TCP service (SSH)"
+    },
+    {
+      "name": "example-insecure",
+      "type": "http_insecure",
+      "target": "https://192.168.1.1/",
+      "severity": 6,
+      "comment": "Example service with self-signed certificate"
+    }
+  ]
+}
+

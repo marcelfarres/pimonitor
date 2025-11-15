@@ -1,0 +1,55 @@
+# Python-generated files
+__pycache__/
+*.py[oc]
+build/
+dist/
+wheels/
+*.egg-info
+
+# Virtual environments
+.venv
+venv/
+
+# Configuration files with sensitive data
+led-monitor-cfg.json
+*.cfg.json
+config.json
+
+# Systemd service files (may contain user-specific paths)
+*.service
+!*.service.example
+
+# Environment files
+.env
+.env.local
+.env.*.local
+
+# Log files
+*.log
+logs/
+*.log.*
+
+# Cache and temporary files
+.cache/
+*.cache
+*.tmp
+*.temp
+*.swp
+*.swo
+*~
+
+# IDE and editor files
+.vscode/
+.idea/
+*.sublime-*
+.DS_Store
+
+# Backup files
+*.bak
+*.backup
+*~
+
+# Lock files (optional - uncomment if you want to ignore)
+# uv.lock
+# poetry.lock
+# Pipfile.lock
