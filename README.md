@@ -24,9 +24,22 @@ This started as a simple way to monitor Pi-hole at home, but turned into a prett
 - 470Ω resistor (only if you're using a standalone LED ring)
 - 5V power supply (2-3A should be plenty for LED rings)
 
-## Wiring
+## Setup
 
-### LED Ring
+### Using the Kano Hat (Easiest!)
+
+If you have the **Kano Computer Kit hat**, it's super simple:
+
+1. Just plug it directly onto the Raspberry Pi GPIO header
+2. That's it! No wiring needed - the hat handles everything (LEDs on GPIO 18, button on GPIO 3)
+
+The hat is designed to be plug-and-play, so you can skip all the wiring instructions below.
+
+### Using a Standalone LED Ring (Manual Wiring)
+
+If you're using a standalone WS2812B LED ring instead of the Kano hat, you'll need to wire it up manually:
+
+**LED Ring Wiring:**
 
 ```text
 LED Ring VCC  →  Pi Pin 2 (5V)
@@ -34,14 +47,14 @@ LED Ring GND  →  Pi Pin 6 (GND)
 LED Ring DIN  →  Pi Pin 12 (GPIO 18) [via 470Ω resistor]
 ```
 
-### Button (Optional)
+**Button Wiring (Optional):**
 
 ```text
 Button Pin 1  →  Pi Pin 11 (GPIO 17)
 Button Pin 2  →  Pi Pin 9 (GND)
 ```
 
-**Note:** GPIO 18 is required (needs PWM support). The button uses an internal pull-up resistor, so wiring is pretty simple.
+**Note:** GPIO 18 is required (needs PWM support). If using an external button, it uses an internal pull-up resistor, so wiring is pretty simple.
 
 ## Installation
 
@@ -149,9 +162,9 @@ BREATHING_SPEED = 0.02          # Animation speed (lower = slower)
 
 ### Changing Button GPIO
 
-On the Kano hat the power button is pre‑wired to **BCM GPIO 3** and is
-handled by the `kano_hat.py` helper. If you connect an external button
-instead of using the hat button, edit `kano_hat.py`:
+If you're using the **Kano hat**, the button is already wired to **BCM GPIO 3** - no changes needed!
+
+If you're using a **standalone button** instead, edit `pimonitor/kano_hat.py`:
 
 ```python
 BUTTON_PIN = 3  # Change to your GPIO number when not using the hat button
@@ -159,20 +172,21 @@ BUTTON_PIN = 3  # Change to your GPIO number when not using the hat button
 
 ### Adjusting LED Count
 
-The Kano hat uses a fixed **10‑LED ring** on GPIO 18. If you connect a
-different NeoPixel ring, update both the helper and the config:
+**If using the Kano hat:** It has a fixed **10-LED ring** - no changes needed!
 
-**kano_hat.py:**
+**If using a standalone LED ring:** Update both files to match your ring size:
+
+**pimonitor/kano_hat.py:**
 
 ```python
-LED_COUNT = 10  # Change to match your ring size
+LED_COUNT = 10  # Change to match your ring size (12, 16, 24, 60, etc.)
 ```
 
 **led-monitor-cfg.json:**
 
 ```json
 {
-  "led_count": 10  // Match your ring
+  "led_count": 10  // Match your ring size
 }
 ```
 
@@ -259,10 +273,18 @@ nano led-monitor-cfg.json
 
 ### LEDs Don't Light Up
 
+**If using the Kano hat:**
+
+1. Make sure the hat is fully seated on the GPIO header
+2. Try running with sudo: `sudo python3 led-monitor.py`
+3. Check that the Pi has enough power (use a good quality power supply)
+
+**If using a standalone LED ring:**
+
 1. Double-check your wiring (GPIO 18 to DIN, don't forget the 470Ω resistor!)
 2. Make sure LED_COUNT matches your actual ring size
 3. Try running with sudo: `sudo python3 led-monitor.py`
-4. Check your power supply (needs 5V with enough amperage)
+4. Check your power supply (needs 5V with enough amperage - LED rings can be power-hungry)
 
 ### Service Won't Start
 
@@ -282,9 +304,18 @@ uv pip install --system --force-reinstall rpi_ws281x requests RPi.GPIO
 
 ### Button Not Working
 
-1. Verify wiring (GPIO 17 to button, button to GND)
-2. Check GPIO pin matches your hardware
-3. Test with: `sudo python3 test_button.py`
+**If using the Kano hat:**
+
+1. Make sure the hat is fully seated on the GPIO header
+2. The button should work automatically (it's on GPIO 3)
+3. Test with: `sudo python3 tests/test-button-detailed.py`
+4. Check logs for "Button pressed!" message
+
+**If using a standalone button:**
+
+1. Verify wiring (GPIO pin to button, button to GND)
+2. Check GPIO pin matches your hardware (default is GPIO 3 in kano_hat.py)
+3. Test with: `sudo python3 tests/test-button-detailed.py`
 4. Check logs for "Button pressed!" message
 
 ### Pi-hole Check Fails
