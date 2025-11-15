@@ -349,16 +349,22 @@ sudo systemctl restart led-monitor.service
 
 ### Update Script
 
-```bash
-# Stop service
-sudo systemctl stop led-monitor.service
+The easiest way to update and redeploy is using the helper script:
 
-# Update files (if using git)
+```bash
+# Update code (if using git)
 git pull
 
-# Restart
-sudo systemctl start led-monitor.service
+# Redeploy and restart the service
+./redeploy-led-monitor.sh
 ```
+
+This script will:
+
+- Copy the latest service file to systemd
+- Reload systemd daemon
+- Restart the service
+- Show you the service status
 
 ## Files
 
@@ -367,6 +373,7 @@ sudo systemctl start led-monitor.service
 - **led-monitor-cfg.json.example** - Example service configuration (copy to `led-monitor-cfg.json`)
 - **led-monitor.service.example** - Example systemd service file (copy and edit paths)
 - **led-monitor-web.service.example** - Example web status service file
+- **redeploy-led-monitor.sh** - Helper script to redeploy and restart the service
 - **requirements.txt** - Python dependencies
 - **tests/led-ring-test.py** - LED hardware test
 - **tests/test-monitor.py** - Complete system test
