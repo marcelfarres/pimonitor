@@ -10,8 +10,9 @@ import json
 import subprocess
 import requests
 import socket
+import random
 from pathlib import Path
-from threading import Event
+from threading import Event, Thread, Lock
 import signal
 import sys
 import math
@@ -54,10 +55,11 @@ OK_ROTATION_SPEED = 0.2         # Comet rotation speed (radians per frame)
 ERROR_MIN_BRIGHTNESS = 30       # Minimum brightness during error pulses (0-255)
 ERROR_MAX_BRIGHTNESS = 120      # Maximum brightness during error pulses (0-255)
 
-# Internet-down animation configuration (dim teal wave, non-aggressive)
-INTERNET_MIN_BRIGHTNESS = 15    # Minimum brightness for internet-down wave
-INTERNET_MAX_BRIGHTNESS = 80    # Maximum brightness for internet-down wave
-INTERNET_WAVE_SPEED = 0.01      # Speed of the internet-down wave animation
+# Internet-down animation configuration (glitchy pattern with contrast)
+INTERNET_MIN_BRIGHTNESS = 0     # Minimum brightness (can be 0 for black pixels)
+INTERNET_MAX_BRIGHTNESS = 100   # Maximum brightness for internet-down wave
+INTERNET_WAVE_SPEED = 0.2       # Speed of the internet-down wave animation
+INTERNET_WAVE_THRESHOLD = 0.15   # Wave values below this become black (0-1)
 
 # Colors
 COLOR_OK = Color(0, 255, 0)        # Green
@@ -100,6 +102,9 @@ class ServiceMonitor:
         # Internet connectivity state and animation phase.
         self.internet_ok: bool = True
         self.internet_phase: float = 0.0
+        # Track recent glitch positions and counts (for decreasing probability on repeats)
+        self.glitch_counts: dict[int, int] = {}  # LED index -> number of recent glitches
+        self.last_glitch_time: float = 0.0
 
         # Track failing services and which ones have been snoozed via the
         # button so that we only pulse when new failures appear.
@@ -107,6 +112,11 @@ class ServiceMonitor:
         self.snoozed_failed_services: set[str] = set()
         # Short-lived visual feedback when the button is pressed.
         self.ack_flash_pending: bool = False
+        
+        # Thread-safe state for service checks running in background
+        self.service_statuses_lock = Lock()
+        self.service_statuses: dict = {}
+        self.check_in_progress = False
 
         # Initialize Kano hat (LED ring + button) using local abstraction.
         # The abstraction takes care of setting up both the rpi_ws281x strip
@@ -792,22 +802,23 @@ class ServiceMonitor:
         Function: internet_down_animation_step
 
         Tiny description:
-          Animate a distinct, calm pattern when internet connectivity is down.
+          Animate a distinct, glitchy pattern with high contrast when internet is down.
 
         Input parameters:
           - None. Uses internal `internet_phase` state and hat LED count.
 
         Output parameters:
-          - None. Updates the LED ring to show a teal/blue wave.
+          - None. Updates the LED ring to show a colorful "glitch" effect.
 
         Longer description:
           When the dedicated internet probe fails, this animation replaces the
-          normal all‑OK or per‑service failure patterns. It renders a dim,
-          slow‑moving teal/blue wave around the ring using a sine function so
-          that brightness gently rises and falls per LED. The colour and motion
-          are chosen to be clearly different from the red/orange error states
-          and the green OK wave, while remaining subtle (no sharp flashes or
-          full‑brightness output).
+          normal all‑OK or per‑service failure patterns. It renders a shorter
+          blue/cyan wave with black gaps (high contrast) that moves around the
+          ring, and overlays frequent colorful "glitch" sparkles in vibrant
+          cyan, magenta, purple, pink, and teal tones on random LEDs. Glitch
+          colors vary in intensity and are chosen from an expanded palette to
+          create a playful, varied effect that clearly indicates connectivity
+          issues without being aggressive.
         """
         if not self.hat:
             return
@@ -817,24 +828,111 @@ class ServiceMonitor:
         except AttributeError:
             led_total = LED_COUNT
 
-        # Advance phase slowly for a calm, continuous wave.
+        # Advance phase slowly for a calm background motion.
         self.internet_phase += INTERNET_WAVE_SPEED
         if self.internet_phase >= 2 * math.pi:
             self.internet_phase -= 2 * math.pi
+
+        # Clear old glitch counts periodically (every ~2 seconds of animation)
+        # This allows glitches to eventually appear in previously used areas
+        current_time = time.time()
+        if current_time - self.last_glitch_time > 2.0:
+            self.glitch_counts.clear()
+
+        # Determine if we should allow glitches this frame (cooldown to prevent constant glitching)
+        min_glitch_interval = 0.08  # Minimum seconds between glitch bursts (reduced for more frequency)
+        allow_glitches = (current_time - self.last_glitch_time) >= min_glitch_interval
+
+        # Minimum distance between glitches (in LED indices) - reduced to 1
+        min_glitch_distance = 1
 
         for idx in range(led_total):
             phase = self.internet_phase + (2 * math.pi * idx / led_total)
             wave = (math.sin(phase) + 1.0) / 2.0  # 0..1
 
-            brightness = INTERNET_MIN_BRIGHTNESS + wave * (
-                INTERNET_MAX_BRIGHTNESS - INTERNET_MIN_BRIGHTNESS
-            )
+            # Apply threshold to create shorter wave with black pixels
+            if wave < INTERNET_WAVE_THRESHOLD:
+                # Below threshold: completely black
+                base_brightness = 0
+            else:
+                # Above threshold: remap to full brightness range for more contrast
+                remapped_wave = (wave - INTERNET_WAVE_THRESHOLD) / (1.0 - INTERNET_WAVE_THRESHOLD)
+                base_brightness = INTERNET_MIN_BRIGHTNESS + remapped_wave * (
+                    INTERNET_MAX_BRIGHTNESS - INTERNET_MIN_BRIGHTNESS
+                )
 
-            # Teal/blue tone that we do not use elsewhere:
-            # more blue than green, no red component.
-            r = 0
-            g = int(brightness * 0.35)
-            b = int(brightness)
+            # Base colour: dark blue/cyan blend, no red (only if wave is above threshold)
+            if base_brightness > 0:
+                r = 0
+                g = int(base_brightness * 0.25)
+                b = int(base_brightness * 0.9)
+            else:
+                r = g = b = 0
+
+            # More frequent glitches with decreasing probability on repeats
+            # Base probability is higher, but decreases if LED has glitched recently
+            base_glitch_prob = 0.18  # Increased base probability for more frequency
+            
+            if allow_glitches:
+                # Get how many times this LED has glitched recently
+                glitch_count = self.glitch_counts.get(idx, 0)
+                
+                # Reduce probability based on repeat count (exponential decay)
+                # 1st glitch: 100% of base prob, 2nd: 50%, 3rd: 25%, 4th: 12.5%, etc.
+                repeat_penalty = 0.5 ** glitch_count
+                adjusted_prob = base_glitch_prob * repeat_penalty
+                
+                # Check minimum distance from recent glitches (only if distance > 0)
+                too_close = False
+                if min_glitch_distance > 0:
+                    for glitch_idx, count in self.glitch_counts.items():
+                        if count > 0:  # Only check LEDs that have glitched
+                            # Calculate circular distance (accounting for ring wrap-around)
+                            dist = min(
+                                abs(idx - glitch_idx),
+                                abs(idx - glitch_idx + led_total),
+                                abs(idx - glitch_idx - led_total)
+                            )
+                            if dist < min_glitch_distance:
+                                too_close = True
+                                break
+
+                if not too_close and random.random() < adjusted_prob:
+                    # Expanded colorful palette with more variety
+                    palette = [
+                        # Bright cyan
+                        (0, 180, 255),
+                        # Electric magenta
+                        (255, 0, 200),
+                        # Purple
+                        (150, 0, 255),
+                        # Bright blue
+                        (0, 100, 255),
+                        # Teal
+                        (0, 255, 200),
+                        # Pink
+                        (255, 100, 200),
+                        # Violet
+                        (200, 0, 255),
+                        # Aqua
+                        (0, 255, 150),
+                    ]
+                    gr, gg, gb = random.choice(palette)
+                    
+                    # Vary the intensity of glitches (some brighter, some dimmer)
+                    intensity = random.uniform(0.5, 1.0)
+                    r = int(gr * intensity)
+                    g = int(gg * intensity)
+                    b = int(gb * intensity)
+                    
+                    # Cap brightness to avoid being too aggressive
+                    r = min(r, 180)
+                    g = min(g, 180)
+                    b = min(b, 200)
+
+                    # Track this glitch (increment count) and update timing
+                    self.glitch_counts[idx] = glitch_count + 1
+                    self.last_glitch_time = current_time
 
             self.hat.set_led_color(idx, Color(r, g, b))
 
@@ -870,12 +968,98 @@ class ServiceMonitor:
             if not self.alert_active:
                 self.alert_active = True
 
+    def _check_services_background(self) -> None:
+        """
+        Function: _check_services_background
+
+        Tiny description:
+          Run service checks in a background thread without blocking animations.
+
+        Input parameters:
+          - None. Uses self.config and self methods.
+
+        Output parameters:
+          - None. Updates self.service_statuses and related state via locks.
+
+        Longer description:
+          This method runs in a separate thread to perform all service checks
+          (including internet connectivity) without blocking the main animation
+          loop. It updates service_statuses in a thread-safe manner and handles
+          state transitions for failed services and snooze logic.
+        """
+        try:
+            # Check internet connectivity first, if configured.
+            self.check_internet()
+
+            services = self.config.get("services", [])
+            if not services:
+                return
+
+            new_service_statuses = {}
+            print(f"\n--- Checking {len(services)} services ---")
+
+            for service in services:
+                name = service.get("name", "unknown")
+                try:
+                    severity = int(service.get("severity", 5))
+                except (TypeError, ValueError):
+                    severity = 5
+
+                print(f"Checking {name}...", end=" ")
+                is_ok = self.check_service(service)
+
+                new_service_statuses[name] = {
+                    "ok": is_ok,
+                    "severity": severity,
+                }
+
+                status_str = "✓ OK" if is_ok else "✗ FAILED"
+                print(status_str)
+
+            # Update service_statuses in a thread-safe manner
+            with self.service_statuses_lock:
+                self.service_statuses = new_service_statuses
+
+            # Update display state (resets flags when everything is OK)
+            self.update_display(new_service_statuses)
+
+            # Track failing services and detect new failures so that we
+            # only pulse when a new service goes down.
+            current_failed = {
+                name
+                for name, status in new_service_statuses.items()
+                if not status.get("ok", False)
+            }
+            print(f"Failed services this cycle: {sorted(current_failed)}")
+            print(
+                f"Snoozed failed services: "
+                f"{sorted(self.snoozed_failed_services)}"
+            )
+            new_failures = current_failed - self.failed_services
+            self.failed_services = current_failed
+
+            if not current_failed:
+                # All services recovered; clear snooze state.
+                self.snoozed_failed_services.clear()
+            elif new_failures:
+                # At least one new service failed; re‑enable pulsing.
+                self.alert_active = True
+                self.alert_acknowledged = False
+                # Do not clear snoozed_failed_services here so that
+                # already‑snoozed failures stay snoozed; only the new
+                # ones will cause pulsing.
+
+        except Exception as exc:
+            print(f"Error in background service check: {exc}")
+        finally:
+            self.check_in_progress = False
+
     def monitor_loop(self) -> None:
         """Main monitoring loop."""
         print("Starting service monitor...")
 
+        # Initialize to trigger first check immediately
         last_check_time = 0.0
-        service_statuses: dict = {}
 
         while self.running.is_set():
             try:
@@ -888,7 +1072,7 @@ class ServiceMonitor:
 
                 current_time = time.time()
 
-                # Check services and internet connectivity at specified interval
+                # Start background service check at specified interval (non-blocking)
                 if current_time - last_check_time >= check_interval:
                     if not services:
                         print("No services configured")
@@ -896,62 +1080,18 @@ class ServiceMonitor:
                         time.sleep(1)
                         continue
 
-                    # Check internet connectivity first, if configured.
-                    self.check_internet()
+                    # Start background thread for service checks if not already running
+                    if not self.check_in_progress:
+                        self.check_in_progress = True
+                        check_thread = Thread(target=self._check_services_background, daemon=True)
+                        check_thread.start()
+                        last_check_time = current_time
 
-                    service_statuses = {}
-                    print(f"\n--- Checking {len(services)} services ---")
+                # Get current service statuses in a thread-safe manner
+                with self.service_statuses_lock:
+                    service_statuses = self.service_statuses.copy()
 
-                    for service in services:
-                        name = service.get("name", "unknown")
-                        try:
-                            severity = int(service.get("severity", 5))
-                        except (TypeError, ValueError):
-                            severity = 5
-
-                        print(f"Checking {name}...", end=" ")
-                        is_ok = self.check_service(service)
-
-                        service_statuses[name] = {
-                            "ok": is_ok,
-                            "severity": severity,
-                        }
-
-                        status_str = "✓ OK" if is_ok else "✗ FAILED"
-                        print(status_str)
-
-                    # Update display state (resets flags when everything is OK)
-                    self.update_display(service_statuses)
-
-                    # Track failing services and detect new failures so that we
-                    # only pulse when a new service goes down.
-                    current_failed = {
-                        name
-                        for name, status in service_statuses.items()
-                        if not status.get("ok", False)
-                    }
-                    print(f"Failed services this cycle: {sorted(current_failed)}")
-                    print(
-                        f"Snoozed failed services: "
-                        f"{sorted(self.snoozed_failed_services)}"
-                    )
-                    new_failures = current_failed - self.failed_services
-                    self.failed_services = current_failed
-
-                    if not current_failed:
-                        # All services recovered; clear snooze state.
-                        self.snoozed_failed_services.clear()
-                    elif new_failures:
-                        # At least one new service failed; re‑enable pulsing.
-                        self.alert_active = True
-                        self.alert_acknowledged = False
-                        # Do not clear snoozed_failed_services here so that
-                        # already‑snoozed failures stay snoozed; only the new
-                        # ones will cause pulsing.
-
-                    last_check_time = current_time
-
-                # Continuous animation based on current state
+                # Continuous animation based on current state (never blocks on checks)
                 if service_statuses:
                     # Poll button state on every iteration so that the snooze
                     # behaviour is responsive even while animations are running.

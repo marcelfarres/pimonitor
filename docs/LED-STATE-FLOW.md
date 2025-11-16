@@ -223,7 +223,7 @@ flowchart TD
 | **State A** | `failed_services == ∅`<br/>`internet_ok == True` | Green travelling wave with breathing | ACK blink only |
 | **State B** | `failed_services ≠ ∅`<br/>`unsnoozed_failures ≠ ∅`<br/>`internet_ok == True` | Red background + pulsing orange (unsnoozed) + static purple/blue (snoozed) | Snooze all failures → State C |
 | **State C** | `failed_services ≠ ∅`<br/>`unsnoozed_failures == ∅`<br/>`internet_ok == True` | Red background + static purple/blue only | ACK blink only |
-| **State D** | `internet_ok == False` | Dim teal/blue travelling wave, no red/green | ACK blink only (does not snooze internet-down) |
+| **State D** | `internet_ok == False` | Dark blue/cyan base with occasional soft cyan/magenta/purple “glitch” sparkles | ACK blink only (does not snooze internet-down) |
 | **ACK Overlay** | `ack_flash_pending == True` | All LEDs: dim white (20,20,20) for 50ms | N/A (one frame only) |
 
 ---

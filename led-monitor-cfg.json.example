@@ -1,6 +1,12 @@
 {
   "check_interval": 30,
   "led_count": 10,
+  "internet_probe": {
+    "type": "ping",
+    "target": "1.1.1.1",
+    "timeout": 3,
+    "comment": "Internet connectivity via Cloudflare DNS (1.1.1.1)"
+  },
   "services": [
     {
       "name": "internet",
@@ -14,7 +20,7 @@
       "type": "http",
       "target": "http://localhost/admin/api.php",
       "severity": 3,
-      "comment": "Pi-hole web interface"
+      "comment": "[Service] Pi-hole - DNS ad blocker web interface"
     },
     {
       "name": "tailscale",
@@ -28,21 +34,35 @@
       "type": "http",
       "target": "http://localhost:8080/health",
       "severity": 5,
-      "comment": "Example HTTP service"
+      "comment": "[Service] Example HTTP service - Health check endpoint"
     },
     {
       "name": "example-tcp",
       "type": "tcp",
       "target": "localhost:22",
       "severity": 4,
-      "comment": "Example TCP service (SSH)"
+      "comment": "[Service] SSH - Secure shell access (TCP port 22)"
     },
     {
       "name": "example-insecure",
       "type": "http_insecure",
       "target": "https://192.168.1.1/",
       "severity": 6,
-      "comment": "Example service with self-signed certificate"
+      "comment": "[Router] Router web interface - Self-signed certificate"
+    },
+    {
+      "name": "example-nas",
+      "type": "http",
+      "target": "http://nas.local/ui/dashboard",
+      "severity": 10,
+      "comment": "[NAS] TrueNAS - Storage system web interface"
+    },
+    {
+      "name": "example-tailnet",
+      "type": "ping",
+      "target": "machine.example.ts.net",
+      "severity": 5,
+      "comment": "[Tailnet Machine] Physical computer - Tailscale network connectivity"
     }
   ]
 }

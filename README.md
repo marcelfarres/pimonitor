@@ -104,6 +104,48 @@ nano led-monitor-cfg.json
 - `tcp` - Check TCP port connectivity (e.g., "host:port" or "tcp://host:port")
 - `systemd` - Check systemd services (e.g., "pihole-FTL", "tailscaled")
 
+### Service Categorization
+
+For better organization, you can categorize services in comments using prefixes:
+
+- `[Service]` - HTTP/HTTPS services running on specific ports (web applications, APIs, etc.)
+- `[NAS]` - Network Attached Storage devices (TrueNAS, Synology, etc.) - use `http` or `http_insecure` to check web management interface
+- `[Router]` - Network routers/firewalls - use `http_insecure` for web interfaces or `ping` for basic connectivity
+- `[Tailnet Machine]` - Physical computers in Tailscale network - use `ping` for basic connectivity or `tcp` for specific ports (SSH, RDP, etc.)
+
+**Example with categorization:**
+
+```json
+{
+  "name": "jellyfin",
+  "type": "http",
+  "target": "http://server:8096/",
+  "severity": 8,
+  "comment": "[Service] Jellyfin - Media server"
+},
+{
+  "name": "truenas",
+  "type": "http",
+  "target": "http://truenas.local/ui/dashboard",
+  "severity": 10,
+  "comment": "[NAS] TrueNAS Scale - Main storage system"
+},
+{
+  "name": "pfsense",
+  "type": "http_insecure",
+  "target": "https://192.168.1.1/",
+  "severity": 10,
+  "comment": "[Router] pfSense - Firewall/router web interface"
+},
+{
+  "name": "lab-windows",
+  "type": "ping",
+  "target": "lab-w.example.ts.net",
+  "severity": 5,
+  "comment": "[Tailnet Machine] Lab Windows PC - Tailscale network"
+}
+```
+
 ### Severity (Optional)
 
 You can add a `severity` field (1–10) to each service:
@@ -236,37 +278,57 @@ nano led-monitor-cfg.json
 ### Internet Connectivity
 
 ```json
-{"name": "internet", "type": "ping", "target": "1.1.1.1"}
+{"name": "internet", "type": "ping", "target": "8.8.8.8", "severity": 5, "comment": "Internet connectivity check"}
 ```
 
-### Pi-hole Web Interface
+### HTTP Services (Web Applications)
 
 ```json
-{"name": "pihole", "type": "http", "target": "http://localhost/admin/api.php"}
+{"name": "webapp", "type": "http", "target": "http://localhost:8080/health", "severity": 5, "comment": "[Service] Web Application - Health check endpoint"}
+{"name": "api", "type": "http", "target": "http://api.example.com/v1/status", "severity": 7, "comment": "[Service] API Server - Status endpoint"}
+{"name": "dashboard", "type": "http", "target": "http://dashboard.example.com/", "severity": 3, "comment": "[Service] Dashboard - Web interface"}
 ```
 
-### Pi-hole Service
+### Systemd Services
 
 ```json
-{"name": "pihole", "type": "systemd", "target": "pihole-FTL"}
+{"name": "webserver", "type": "systemd", "target": "nginx", "severity": 8, "comment": "Nginx web server"}
+{"name": "database", "type": "systemd", "target": "postgresql", "severity": 10, "comment": "PostgreSQL database"}
+{"name": "vpn", "type": "systemd", "target": "vpn-service", "severity": 7, "comment": "VPN service"}
 ```
 
-### Tailscale
+### NAS Devices
 
 ```json
-{"name": "tailscale", "type": "systemd", "target": "tailscaled"}
+{"name": "nas-main", "type": "http", "target": "http://nas.local/ui/dashboard", "severity": 10, "comment": "[NAS] Main NAS - Storage system web interface"}
+{"name": "nas-backup", "type": "http_insecure", "target": "https://192.168.1.100:5001/", "severity": 10, "comment": "[NAS] Backup NAS - Offsite storage with self-signed cert"}
 ```
 
-### Docker
+### Routers and Firewalls
 
 ```json
-{"name": "docker", "type": "systemd", "target": "docker"}
+{"name": "firewall", "type": "http_insecure", "target": "https://192.168.1.1/", "severity": 10, "comment": "[Router] Firewall - Router web interface with self-signed cert"}
+{"name": "router", "type": "ping", "target": "router.example.ts.net", "severity": 10, "comment": "[Router] Router - Network connectivity check"}
 ```
 
-### Custom Web Service
+### Tailnet Machines (Physical Computers)
 
 ```json
-{"name": "my_app", "type": "http", "target": "http://localhost:8080/health"}
+{"name": "workstation-01", "type": "ping", "target": "workstation-01.example.ts.net", "severity": 5, "comment": "[Tailnet Machine] Workstation 01 - Tailscale network connectivity"}
+{"name": "server-02", "type": "tcp", "target": "server-02.example.ts.net:22", "severity": 7, "comment": "[Tailnet Machine] Server 02 - SSH access (port 22)"}
+```
+
+### TCP Port Checks
+
+```json
+{"name": "ssh", "type": "tcp", "target": "server.example.com:22", "severity": 4, "comment": "[Service] SSH - Secure shell access"}
+{"name": "database", "type": "tcp", "target": "db.example.com:5432", "severity": 10, "comment": "[Service] PostgreSQL - Database connection (port 5432)"}
+```
+
+### Services with Self-Signed Certificates
+
+```json
+{"name": "internal-service", "type": "http_insecure", "target": "https://internal.example.com:8443/", "severity": 8, "comment": "[Service] Internal Service - Web UI with self-signed certificate"}
 ```
 
 ## Troubleshooting
