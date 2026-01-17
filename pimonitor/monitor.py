@@ -110,6 +110,9 @@ class ServiceMonitor:
         # button so that we only pulse when new failures appear.
         self.failed_services: set[str] = set()
         self.snoozed_failed_services: set[str] = set()
+        # Map service names to their assigned LED indices (persistent across cycles)
+        # This ensures acknowledged services keep their LED and new failures use free LEDs
+        self.service_led_map: dict[str, int] = {}
         # Short-lived visual feedback when the button is pressed.
         self.ack_flash_pending: bool = False
         
@@ -638,10 +641,12 @@ class ServiceMonitor:
         Longer description:
           This animation uses a uniform dim red background to indicate that
           something is wrong, and then assigns each failing service to an LED
-          slot where it pulses. The pulse **speed** and **intensity** depend
-          on the service severity so that more critical failures pulse faster
-          and brighter. If there are more failing services than LEDs, they
-          share slots, and the brightest pulse wins for that slot.
+          slot where it pulses. Snoozed (acknowledged) services maintain their
+          LED assignment and are shown as static purple/blue colors. Unsnoozed
+          (new) failures are assigned to free LEDs (not occupied by snoozed
+          services) and pulse with severity-based colors (yellow→orange→red).
+          The pulse **speed** and **intensity** depend on the service severity
+          so that more critical failures pulse faster and brighter.
         """
         if not self.hat:
             return
@@ -652,6 +657,8 @@ class ServiceMonitor:
             if not status.get("ok", False)
         ]
         if not failing:
+            # Clean up LED mappings for services that recovered
+            self.service_led_map.clear()
             return
 
         try:
@@ -674,6 +681,54 @@ class ServiceMonitor:
             if name in self.snoozed_failed_services
         ]
 
+        # Clean up LED mappings for services that are no longer failing
+        current_failing_names = {name for name, _ in failing}
+        self.service_led_map = {
+            name: led_idx
+            for name, led_idx in self.service_led_map.items()
+            if name in current_failing_names
+        }
+
+        # Assign LEDs to snoozed services first (preserve existing assignments)
+        snoozed_leds = set()
+        for name, severity in snoozed:
+            # If service already has an LED assignment, keep it
+            if name in self.service_led_map:
+                led_index = self.service_led_map[name]
+            else:
+                # Find first available LED (not already used by snoozed services)
+                led_index = 0
+                while led_index < led_total and led_index in snoozed_leds:
+                    led_index += 1
+                if led_index >= led_total:
+                    # Wrap around if we run out of LEDs
+                    led_index = 0
+                    while led_index in snoozed_leds:
+                        led_index += 1
+                self.service_led_map[name] = led_index
+            snoozed_leds.add(led_index)
+
+        # Assign LEDs to unsnoozed services (use free LEDs, not occupied by snoozed)
+        unsnoozed_leds = set()
+        for name, severity in unsnoozed:
+            # If service already has an LED assignment, keep it (unless it's now snoozed)
+            if name in self.service_led_map and self.service_led_map[name] not in snoozed_leds:
+                led_index = self.service_led_map[name]
+            else:
+                # Find first available LED (not used by snoozed or other unsnoozed)
+                led_index = 0
+                while led_index < led_total and (
+                    led_index in snoozed_leds or led_index in unsnoozed_leds
+                ):
+                    led_index += 1
+                if led_index >= led_total:
+                    # Wrap around if we run out of LEDs
+                    led_index = 0
+                    while led_index in snoozed_leds or led_index in unsnoozed_leds:
+                        led_index += 1
+                self.service_led_map[name] = led_index
+            unsnoozed_leds.add(led_index)
+
         # Start with a dim red background on all LEDs so that any failure state
         # is clearly visible even where no individual service is mapped.
         led_r = [base_brightness for _ in range(led_total)]
@@ -681,8 +736,8 @@ class ServiceMonitor:
         led_b = [0 for _ in range(led_total)]
 
         # Static representation for snoozed failures: deep purple → blue by severity.
-        for idx, (_, severity) in enumerate(snoozed):
-            led_index = idx % led_total
+        for name, severity in snoozed:
+            led_index = self.service_led_map.get(name, 0)
             try:
                 sev = max(1, min(int(severity), 10))
             except (TypeError, ValueError):
@@ -698,10 +753,11 @@ class ServiceMonitor:
             led_g[led_index] = g
             led_b[led_index] = b
 
-        # Pulsing representation for unsnoozed failures: orange pulses.
+        # Pulsing representation for unsnoozed failures: severity-based color gradient.
+        # Low severity (1-3): Yellow, Medium (4-7): Orange, High (8-10): Red
         now = time.time()
-        for idx, (_, severity) in enumerate(unsnoozed):
-            led_index = idx % led_total
+        for name, severity in unsnoozed:
+            led_index = self.service_led_map.get(name, 0)
 
             try:
                 sev = max(1, min(int(severity), 10))
@@ -718,14 +774,45 @@ class ServiceMonitor:
             amplitude = (ERROR_MAX_BRIGHTNESS - base_brightness) * (0.4 + 0.6 * sev_norm)
             pulse_brightness = base_brightness + wave * amplitude
 
-            red_component = int(pulse_brightness)
-            green_component = int(pulse_brightness * 0.4)
+            # Severity-based color gradient: Yellow (low) → Orange (medium) → Red (high)
+            # Colors are designed to stand out clearly against the red background (base_brightness=30)
+            # Severity 1-3: Yellow (high green, medium red) - clearly distinct from red background
+            # Severity 4-7: Orange (medium red, medium green) - distinct warm color
+            # Severity 8-10: Red (high red, minimal green) - matches background but brighter
+            if sev <= 3:
+                # Yellow gradient: severity 1-3
+                # High green component makes it clearly distinct from red background
+                t = (sev - 1) / 2.0  # 0.0 to 1.0 for sev 1-3
+                red_ratio = 0.5 + 0.15 * t  # 0.5 to 0.65 (less red than background)
+                green_ratio = 0.9 + 0.1 * t  # 0.9 to 1.0 (high green for yellow)
+                blue_ratio = 0.0
+            elif sev <= 7:
+                # Orange gradient: severity 4-7
+                # Balanced red/green creates orange that stands out from red background
+                t = (sev - 4) / 3.0  # 0.0 to 1.0 for sev 4-7
+                red_ratio = 0.85 + 0.15 * t  # 0.85 to 1.0 (more red than yellow)
+                green_ratio = 0.5 - 0.2 * t  # 0.5 to 0.3 (less green than yellow)
+                blue_ratio = 0.0
+            else:
+                # Red gradient: severity 8-10
+                # Pure red but much brighter than background to show severity
+                t = (sev - 8) / 2.0  # 0.0 to 1.0 for sev 8-10
+                red_ratio = 1.0  # Full red
+                green_ratio = 0.15 - 0.1 * t  # 0.15 to 0.05 (minimal green, just for warmth)
+                blue_ratio = 0.0
+
+            # Apply color ratios to pulse brightness
+            # The pulse_brightness already accounts for the base, so we're replacing
+            # the background completely with the severity-colored pulse
+            red_component = int(pulse_brightness * red_ratio)
+            green_component = int(pulse_brightness * green_ratio)
+            blue_component = int(pulse_brightness * blue_ratio)
 
             # Pulses override any static colour on that LED so that new/unsnoozed
             # alerts are always clearly visible.
             led_r[led_index] = red_component
             led_g[led_index] = green_component
-            led_b[led_index] = 0
+            led_b[led_index] = blue_component
 
         for idx in range(led_total):
             self.hat.set_led_color(
@@ -961,6 +1048,7 @@ class ServiceMonitor:
             self.alert_acknowledged = False
             self.failed_services.clear()
             self.snoozed_failed_services.clear()
+            self.service_led_map.clear()
             # Breathing animation is handled in the monitor loop
         else:
             # Some services failed; details are handled in `monitor_loop`
@@ -1039,8 +1127,9 @@ class ServiceMonitor:
             self.failed_services = current_failed
 
             if not current_failed:
-                # All services recovered; clear snooze state.
+                # All services recovered; clear snooze state and LED mappings.
                 self.snoozed_failed_services.clear()
+                self.service_led_map.clear()
             elif new_failures:
                 # At least one new service failed; re‑enable pulsing.
                 self.alert_active = True

@@ -196,9 +196,9 @@ flowchart TD
     
     CalcAmplitude --> CalcPulse[Calculate pulse_brightness:<br/>base + wave * amplitude]
     
-    CalcPulse --> CalcOrange[Calculate orange color:<br/>r = pulse_brightness<br/>g = pulse_brightness * 0.4<br/>b = 0]
+    CalcPulse --> CalcSeverityColor[Calculate severity-based color:<br/>Severity 1-3: Yellow (high green, med red)<br/>Severity 4-7: Orange (med red, med green)<br/>Severity 8-10: Red (high red, low green)]
     
-    CalcOrange --> SetUnsnoozedLED[Set LED at idx % LED_COUNT:<br/>led_r, led_g, led_b = orange color<br/>Overwrites red background]
+    CalcSeverityColor --> SetUnsnoozedLED[Set LED at assigned index:<br/>led_r, led_g, led_b = severity color<br/>Overwrites red background]
     
     SetUnsnoozedLED --> UnsnoozedLoop
     UnsnoozedLoop -->|All unsnoozed| RenderLoop{For each LED<br/>0 to LED_COUNT}
@@ -264,12 +264,16 @@ stateDiagram-v2
     note right of StateB
         Condition: failed_services not empty
         unsnoozed_failures not empty
-        Pattern: Red bg + pulsing orange
+        Pattern: Red bg + pulsing severity colors
         Animation: failure_animation_step
-        - Red background (all LEDs)
-        - Static purple/blue (snoozed)
-        - Pulsing orange (unsnoozed)
-        - Severity affects pulse speed/brightness
+        - Red background (all LEDs, base_brightness=30)
+        - Static purple/blue (snoozed services)
+        - Pulsing severity colors (unsnoozed):
+          * Yellow (severity 1-3)
+          * Orange (severity 4-7)
+          * Red (severity 8-10)
+        - Severity affects pulse speed, brightness, and color
+        - Each service gets its own LED (persistent mapping)
         Button: Snooze all -> State C
     end note
     
@@ -371,10 +375,10 @@ flowchart TD
 
 | Transition | Trigger | State Changes | Visual Effect |
 |------------|---------|---------------|---------------|
-| **A → B** | New service fails | `failed_services` grows<br/>`unsnoozed_failures` grows<br/>`alert_active = True` | Green wave → Red bg + pulsing orange |
-| **B → C** | Button pressed | `snoozed_failed_services = failed_services`<br/>`unsnoozed_failures = ∅`<br/>`ack_flash_pending = True` | Pulsing orange → Static purple/blue |
-| **C → B** | New service fails (not snoozed) | `failed_services` grows<br/>`unsnoozed_failures` grows | Static purple/blue → Add pulsing orange |
-| **B/C → A** | All services recover | `failed_services.clear()`<br/>`snoozed_failed_services.clear()`<br/>`alert_active = False` | Red bg → Green wave |
+| **A → B** | New service fails | `failed_services` grows<br/>`unsnoozed_failures` grows<br/>`alert_active = True`<br/>`service_led_map` assigns LED | Green wave → Red bg + pulsing severity color (yellow/orange/red) |
+| **B → C** | Button pressed | `snoozed_failed_services = failed_services`<br/>`unsnoozed_failures = ∅`<br/>`ack_flash_pending = True`<br/>LED assignments preserved | Pulsing severity color → Static purple/blue |
+| **C → B** | New service fails (not snoozed) | `failed_services` grows<br/>`unsnoozed_failures` grows<br/>New service gets free LED | Static purple/blue (existing) + pulsing severity color (new) |
+| **B/C → A** | All services recover | `failed_services.clear()`<br/>`snoozed_failed_services.clear()`<br/>`service_led_map.clear()`<br/>`alert_active = False` | Red bg → Green wave |
 
 ---
 
@@ -388,26 +392,40 @@ flowchart TD
     
     GetFailing --> Separate[Separate into:<br/>unsnoozed list<br/>snoozed list]
     
-    Separate --> SnoozedMap{For each<br/>snoozed service}
-    SnoozedMap -->|idx, name, severity| CalcSnoozedLED[led_index = idx % LED_COUNT<br/>where idx is position in snoozed list]
-    CalcSnoozedLED --> SetSnoozed[Set LED at led_index:<br/>Static purple/blue color]
-    SetSnoozed --> SnoozedMap
+    Separate --> CleanMap[Clean service_led_map:<br/>Remove services that recovered]
     
-    Separate --> UnsnoozedMap{For each<br/>unsnoozed service}
-    UnsnoozedMap -->|idx, name, severity| CalcUnsnoozedLED[led_index = idx % LED_COUNT<br/>where idx is position in unsnoozed list]
-    CalcUnsnoozedLED --> SetUnsnoozed[Set LED at led_index:<br/>Pulsing orange color<br/>Overwrites red background]
-    SetUnsnoozed --> UnsnoozedMap
+    CleanMap --> AssignSnoozed[Assign LEDs to snoozed services first]
+    AssignSnoozed --> CheckSnoozedMap{Service already<br/>has LED assignment?}
+    CheckSnoozedMap -->|Yes| KeepSnoozedLED[Keep existing LED assignment]
+    CheckSnoozedMap -->|No| FindFreeSnoozed[Find first free LED<br/>not used by snoozed]
+    KeepSnoozedLED --> StoreSnoozed[Store in service_led_map]
+    FindFreeSnoozed --> StoreSnoozed
     
-    SnoozedMap -->|All mapped| Render[Render all LEDs]
-    UnsnoozedMap -->|All mapped| Render
+    StoreSnoozed --> AssignUnsnoozed[Assign LEDs to unsnoozed services]
+    AssignUnsnoozed --> CheckUnsnoozedMap{Service already<br/>has LED assignment<br/>and not snoozed?}
+    CheckUnsnoozedMap -->|Yes| KeepUnsnoozedLED[Keep existing LED assignment]
+    CheckUnsnoozedMap -->|No| FindFreeUnsnoozed[Find first free LED<br/>not used by snoozed or unsnoozed]
+    KeepUnsnoozedLED --> StoreUnsnoozed[Store in service_led_map]
+    FindFreeUnsnoozed --> StoreUnsnoozed
     
-    Render --> End([LED Ring Updated])
+    StoreUnsnoozed --> RenderSnoozed[Render snoozed services:<br/>Static purple/blue by severity]
+    RenderSnoozed --> RenderUnsnoozed[Render unsnoozed services:<br/>Pulsing yellow/orange/red by severity]
     
-    style CalcSnoozedLED fill:#9370db
-    style CalcUnsnoozedLED fill:#ffa500
-    style SetSnoozed fill:#9370db
-    style SetUnsnoozed fill:#ffa500
+    RenderUnsnoozed --> End([LED Ring Updated])
+    
+    style AssignSnoozed fill:#9370db
+    style AssignUnsnoozed fill:#ffa500
+    style RenderSnoozed fill:#9370db
+    style RenderUnsnoozed fill:#ffa500
 ```
+
+**Key Points:**
+
+- LED assignments are **persistent** - each service keeps its LED until it recovers
+- Snoozed services are assigned first to preserve their LEDs
+- Unsnoozed services use free LEDs (not occupied by snoozed services)
+- New failures never override acknowledged (snoozed) service LEDs
+- Each service gets its own LED, allowing multiple failures to be visible simultaneously
 
 ### Single Service Failure - Before & After Snooze
 

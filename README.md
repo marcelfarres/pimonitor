@@ -150,10 +150,11 @@ For better organization, you can categorize services in comments using prefixes:
 
 You can add a `severity` field (1–10) to each service:
 
-- `1` = not a big deal (just a few LEDs light up when it fails)
-- `10` = everything is on fire (the whole ring lights up red)
+- `1-3` = Low severity → **Yellow** pulsing LED
+- `4-7` = Medium severity → **Orange** pulsing LED  
+- `8-10` = High severity → **Red** pulsing LED
 
-When services go down, it uses the **highest** severity to decide how dramatic the alert should be. So if your NAS (`severity: 10`) goes down, the whole ring lights up red. But if some random service (`severity: 3`) fails, only a small section lights up. Pretty handy for prioritizing what to panic about! 😅
+Each failing service gets its own LED with a color that matches its severity level. Higher severity services pulse faster and brighter to draw more attention. When you acknowledge a failure (press the button), that service's LED changes to a static purple/blue color, but new failures will use different LEDs so you can see all issues at once. Pretty handy for prioritizing what to panic about! 😅
 
 ### 3. Test
 
@@ -237,16 +238,28 @@ LED_COUNT = 10  # Change to match your ring size (12, 16, 24, 60, etc.)
 ### What the LEDs Mean
 
 - 🟢 **Green breathing** = Everything's fine, go back to sleep
-- 🔴 **Red pulsing** = Something's broken! (and it wants your attention)
-- 🔴 **Red static** = Something's still broken, but you've acknowledged it
-- 🔵 **Blue flash** = You pressed the button (nice!)
+- 🟡 **Yellow pulsing** = Low severity service down (severity 1-3)
+- 🟠 **Orange pulsing** = Medium severity service down (severity 4-7)
+- 🔴 **Red pulsing** = High severity service down (severity 8-10)
+- 🟣 **Purple/Blue static** = Service is down but acknowledged (snoozed)
+- 🔵 **Blue flash** = You pressed the button (acknowledgement confirmed)
+- 🔴 **Red background** = Dim red on all LEDs indicates failure state
+
+**Severity Colors:**
+
+- Each failing service gets its own LED with a color based on severity
+- Yellow (1-3): Less critical issues
+- Orange (4-7): Moderate importance
+- Red (8-10): Critical services
+- Colors pulse to draw attention, with higher severity pulsing faster and brighter
 
 ### Button Behavior
 
-1. Service breaks → Red pulsing starts (annoying, right?)
-2. Press the button → Pulsing stops, quick blue flash to confirm
-3. Red LED stays on (so you know something's still down, but it's not nagging you)
-4. Everything recovers → Back to the peaceful green breathing animation
+1. Service breaks → Colored pulsing starts (yellow/orange/red based on severity)
+2. Press the button → Pulsing stops for that service, quick dim flash to confirm
+3. Service LED changes to static purple/blue (acknowledged but still down)
+4. **New failures** get their own LEDs and pulse (won't override acknowledged ones)
+5. Everything recovers → Back to the peaceful green breathing animation
 
 ### Managing the Service
 
